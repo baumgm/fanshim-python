@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 from fanshim import FanShim
 from threading import Lock
+import paho.mqtt.client as mqtt
 import colorsys
 import psutil
 import argparse
 import time
 import signal
 import sys
-
+from time import time, sleep, localtime, strftime
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--threshold', type=float, default=-1, help='Temperature threshold in degrees C to enable fan')
@@ -21,6 +22,11 @@ parser.add_argument('--verbose', action='store_true', default=False, help='Outpu
 parser.add_argument('--nobutton', action='store_true', default=False, help='Disable button input')
 parser.add_argument('--noled', action='store_true', default=False, help='Disable LED control')
 parser.add_argument('--brightness', type=float, default=255.0, help='LED brightness, from 0 to 255')
+parser.add_argument('--mqttUser', default=None, help='User for authentication for mqtt broker')
+parser.add_argument('--mqttPassword', default=None, help='Password for authentication for mqtt broker')
+parser.add_argument('--mqttHost', default='localhost', help='host for mqtt broker')
+parser.add_argument('--mqttPort', type=int, default=1883, help='port for mqtt broker')
+parser.add_argument('--mqttKeepAlive', type=int, default=60, help='Keep alive for mqtt broker')
 
 args = parser.parse_args()
 
@@ -75,6 +81,19 @@ def set_automatic(status):
     armed = status
     last_change = 0
 
+# Eclipse Paho callbacks - http://www.eclipse.org/paho/clients/python/docs/#callbacks
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        print('MQTT connection established')
+        print()
+    else:
+        print('Connection error with result code {} - {}'.format(str(rc), mqtt.connack_string(rc)))
+        #kill main thread
+        sys.exit(1)
+
+def on_publish(client, userdata, mid):
+    print('Data successfully published.')
+    pass
 
 if args.threshold > -1 or args.hysteresis > -1:
     print("""
@@ -83,6 +102,19 @@ Use --on-threshold and --off-threshold instead!
 """)
     sys.exit(1)
 
+mqtt_client = mqtt.Client()
+mqtt_client.on_connect = on_connect
+mqtt_client.on_publish = on_publish
+
+if args.mqttUser:
+    mqtt_client.username_pw_set(args.mqttUser, args.mqttPassword)
+try:
+    mqtt_client.connect(args.mqttHost,
+                        args.mqttPort,
+                        args.mqttKeepAlive)
+except:
+    print('MQTT connection error. Please check your settings in the configuration file "config.ini"')
+    sys.exit(1)
 
 fanshim = FanShim()
 fanshim.set_hold_time(1.0)
@@ -132,6 +164,7 @@ if not args.nobutton:
 try:
     while True:
         t = get_cpu_temp()
+        mqtt_client.publish('fanshim/temperature', t)
         f = get_cpu_freq()
         was_fast = is_fast
         is_fast = (int(f.current) == int(f.max))
@@ -146,6 +179,7 @@ try:
             elif t <= args.off_threshold:
                 enable = False
 
+        mqtt_client.publish('fanshim/active', enable)
         if set_fan(enable):
             last_change = t
 
