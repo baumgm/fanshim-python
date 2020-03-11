@@ -5,7 +5,6 @@ import paho.mqtt.client as mqtt
 import colorsys
 import psutil
 import argparse
-import time
 import signal
 import sys
 from time import time, sleep, localtime, strftime
@@ -92,8 +91,12 @@ def on_connect(client, userdata, flags, rc):
         sys.exit(1)
 
 def on_publish(client, userdata, mid):
-    print('Data successfully published.')
+    # print('Data successfully published.')
     pass
+
+def publish(topic, value):
+    print('Publish data {} - {}'.format(topic, value))
+    mqtt_client.publish(topic, value)
 
 if args.threshold > -1 or args.hysteresis > -1:
     print("""
@@ -115,6 +118,9 @@ try:
 except:
     print('MQTT connection error. Please check your settings in the configuration file "config.ini"')
     sys.exit(1)
+else:
+    mqtt_client.loop_start()
+    sleep(1.0) # some slack to establish the connection
 
 fanshim = FanShim()
 fanshim.set_hold_time(1.0)
@@ -164,7 +170,7 @@ if not args.nobutton:
 try:
     while True:
         t = get_cpu_temp()
-        mqtt_client.publish('fanshim/temperature', t)
+        publish('fanshim/temperature', t)
         f = get_cpu_freq()
         was_fast = is_fast
         is_fast = (int(f.current) == int(f.max))
@@ -179,13 +185,13 @@ try:
             elif t <= args.off_threshold:
                 enable = False
 
-        mqtt_client.publish('fanshim/active', enable)
+        publish('fanshim/active', enable)
         if set_fan(enable):
             last_change = t
 
         if not args.noled:
             update_led_temperature(t)
 
-        time.sleep(args.delay)
+        sleep(args.delay)
 except KeyboardInterrupt:
     pass
